@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FZQ专属闹钟 ❤</title>
+    <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
+    <script defer src="https://pyscript.net/latest/pyscript.js"></script>
+    <style>
+    <!-- 在<head>标签内添加 -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#fff0f5">
+
+    <!-- iOS额外配置 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+
+    <!-- 注册Service Worker -->
+    <script>
+if('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+</script>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #fff0f5;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: hotpink;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: skyblue;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        #status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .stop-btn {
+            background-color: green;
+        }
+        /* 隐藏音频元素 */
+        #alarm-player {
+            display: none;
+        }
+        /* 星期选择器样式 */
+        .weekday-selector {
+            display: flex;
+            justify-content: space-between;
+            margin: 15px 0;
+        }
+        .weekday-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .weekday-option input {
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>❤ 小老婆，早安 ❤</h1>
+    <div class="container">
+        <label for="alarm-time">设置闹钟时间 (HH:MM):</label>
+        <input type="text" id="alarm-time" placeholder="07:00">
+        
+        <label>选择响铃星期:</label>
+        <div class="weekday-selector">
+            <div class="weekday-option">
+                <span>周一</span>
+                <input type="checkbox" id="mon" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周二</span>
+                <input type="checkbox" id="tue" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周三</span>
+                <input type="checkbox" id="wed" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周四</span>
+                <input type="checkbox" id="thu" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周五</span>
+                <input type="checkbox" id="fri" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周六</span>
+                <input type="checkbox" id="sat" checked>
+            </div>
+            <div class="weekday-option">
+                <span>周日</span>
+                <input type="checkbox" id="sun" checked>
+            </div>
+        </div>
+        
+        <label for="audio-file">选择铃声文件:</label>
+        <input type="file" id="audio-file" accept=".mp3,.wav,.ogg">
+        
+        <button id="set-alarm" py-click="set_alarm()">设置闹钟</button>
+        <button id="stop-alarm" class="stop-btn" py-click="stop_alarm()" style="display:none;">停止闹钟</button>
+        
+        <div id="status"></div>
+        
+        <!-- HTML5音频元素 -->
+        <audio id="alarm-player" loop></audio>
+    </div>
+
+    <py-config>
+        packages = []
+    </py-config>
+
+    <py-script>
+        from js import document, console, alert, URL
+        from datetime import datetime, timedelta
+        import asyncio
+        
+        alarm_time = None
+        alarm_active = False
+        audio_url = None
+        selected_weekdays = set()  # 存储选中的星期
+        
+        def set_alarm():
+            global alarm_time, alarm_active, audio_url, selected_weekdays
+            
+            # 获取用户输入
+            time_str = document.getElementById("alarm-time").value
+            file_input = document.getElementById("audio-file").files
+            
+            # 获取选中的星期
+            selected_weekdays = set()
+            weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+            weekday_names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+            
+            for i, day in enumerate(weekdays):
+                if document.getElementById(day).checked:
+                    selected_weekdays.add(i)  # 0=周一, 1=周二,...,6=周日
+            
+            if not selected_weekdays:
+                alert("请至少选择一个星期")
+                return
+                
+            # 验证时间格式
+            try:
+                alarm_time = datetime.strptime(time_str, "%H:%M").time()
+            except ValueError:
+                alert("请输入正确的时间格式 (HH:MM)")
+                return
+                
+            # 验证音频文件
+            if not file_input.length:
+                alert("请先选择铃声文件")
+                return
+                
+            # 创建临时音频URL
+            audio_url = URL.createObjectURL(file_input[0])
+            
+            # 显示状态
+            status = document.getElementById("status")
+            selected_days = ", ".join([weekday_names[i] for i in sorted(selected_weekdays)])
+            status.innerHTML = f"闹钟已设置! 将在{selected_days}的{alarm_time.strftime('%H:%M')}响起"
+            status.style.color = "green"
+            
+            # 显示停止按钮
+            document.getElementById("stop-alarm").style.display = "block"
+            
+            # 启动后台检查
+            alarm_active = True
+            asyncio.ensure_future(check_alarm_loop())
+        
+        async def check_alarm_loop():
+            global alarm_active
+            
+            while alarm_active:
+                now = datetime.now()
+                current_weekday = now.weekday()  # 0=周一, 1=周二,...,6=周日
+                
+                # 检查是否是选中的星期
+                if current_weekday in selected_weekdays:
+                    # 创建今天的触发时间
+                    trigger_time = datetime.combine(now.date(), alarm_time)
+                    
+                    # 如果时间已过，检查明天是否是选中的星期
+                    if now >= trigger_time:
+                        tomorrow = now + timedelta(days=1)
+                        tomorrow_weekday = tomorrow.weekday()
+                        if tomorrow_weekday in selected_weekdays:
+                            trigger_time = datetime.combine(tomorrow.date(), alarm_time)
+                    
+                    # 检查是否到达触发时间
+                    if now >= trigger_time:
+                        play_alarm()
+                        # 等待到第二天再检查
+                        await asyncio.sleep(60)  # 防止短时间内重复触发
+                        continue
+                
+                await asyncio.sleep(1)  # 每秒检查一次
+        
+        def play_alarm():
+            # 获取音频元素并播放
+            player = document.getElementById("alarm-player")
+            player.src = audio_url
+            player.play()
+            
+            # 更新状态
+            status = document.getElementById("status")
+            status.innerHTML = "闹钟响了! 快起床啦!"
+            status.style.color = "red"
+            
+            # 显示停止按钮
+            document.getElementById("stop-alarm").style.display = "block"
+        
+        def stop_alarm():
+            global alarm_active
+            
+            # 停止音频播放
+            player = document.getElementById("alarm-player")
+            player.pause()
+            player.currentTime = 0
+            
+            # 释放音频URL内存
+            if audio_url:
+                URL.revokeObjectURL(audio_url)
+            
+            # 更新状态
+            status = document.getElementById("status")
+            status.innerHTML = "闹钟已停止"
+            status.style.color = "black"
+            
+            # 隐藏停止按钮
+            document.getElementById("stop-alarm").style.display = "none"
+            
+            alarm_active = False
+    </py-script>
+</body>
+</html>
